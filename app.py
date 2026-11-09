@@ -121,7 +121,12 @@ def load_user(user_id):
 
 @app.context_processor
 def inject_globals():
-    return {"today": date.today()}
+    configured_admin = (app.config.get("FACULTY_ADMIN_EMAIL") or "").strip().lower()
+    signed_in_email = (current_user.email or "").strip().lower() if current_user.is_authenticated and isinstance(current_user, Faculty) else ""
+    return {
+        "today": date.today(),
+        "is_faculty_admin": bool(configured_admin and signed_in_email == configured_admin),
+    }
 
 
 @app.route("/manifest.json")
@@ -155,6 +160,21 @@ def faculty_required(view):
         if not isinstance(current_user, Faculty):
             abort(403)
         return view(*args, **kwargs)
+    return wrapped
+
+
+def faculty_admin_required(view):
+    from functools import wraps
+
+    @wraps(view)
+    @faculty_required
+    def wrapped(*args, **kwargs):
+        configured_admin = (app.config.get("FACULTY_ADMIN_EMAIL") or "").strip().lower()
+        signed_in_email = (current_user.email or "").strip().lower()
+        if not configured_admin or not secrets.compare_digest(signed_in_email, configured_admin):
+            abort(403)
+        return view(*args, **kwargs)
+
     return wrapped
 
 
@@ -234,6 +254,34 @@ def register():
             flash("Your faculty account has been created.", "success")
             return redirect(url_for("dashboard"))
     return render_template("register.html")
+
+
+@app.route("/faculty", methods=["GET", "POST"])
+@faculty_admin_required
+def faculty_management():
+    if request.method == "POST":
+        if not consume_login_attempt("faculty-create", limit=10, window_minutes=15):
+            abort(429)
+        name = request.form.get("name", "").strip()
+        email = request.form.get("email", "").strip().lower()
+        password = request.form.get("password", "")
+        confirm = request.form.get("confirm_password", "")
+        if not name or not email or len(password) < 12:
+            flash("Enter a name, valid email and a temporary password of at least 12 characters.", "danger")
+        elif password != confirm:
+            flash("The passwords do not match.", "danger")
+        elif Faculty.query.filter_by(email=email).first():
+            flash("A faculty account with that email already exists.", "warning")
+        else:
+            faculty = Faculty(name=name, email=email)
+            faculty.set_password(password)
+            db.session.add(faculty)
+            db.session.commit()
+            clear_login_attempts("faculty-create")
+            flash(f"Faculty account created for {email}. Share the temporary password securely and ask them to change it after signing in.", "success")
+            return redirect(url_for("faculty_management"))
+    faculty_members = Faculty.query.order_by(Faculty.name).all()
+    return render_template("faculty.html", faculty_members=faculty_members)
 
 
 @app.route("/login", methods=["GET", "POST"])

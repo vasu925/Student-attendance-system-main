@@ -57,7 +57,8 @@ def test_faculty_routes_require_faculty_login(client):
 
 
 def test_database_backed_login_throttle_blocks_after_ten_attempts(client):
-    from app import consume_login_attempt
-    with client.application.app_context():
-        assert all(consume_login_attempt("test-login") for _ in range(10))
-        assert consume_login_attempt("test-login") is False
+    for _ in range(10):
+        response = client.post("/student-attendance", data={"roll_number":"UNKNOWN", "access_code":"wrong"})
+        assert response.status_code == 200
+    blocked = client.post("/student-attendance", data={"roll_number":"UNKNOWN", "access_code":"wrong"})
+    assert blocked.status_code == 429

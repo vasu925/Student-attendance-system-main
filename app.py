@@ -92,6 +92,16 @@ def pwa_service_worker():
     return response
 
 
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html")
+
+
+@app.route("/terms")
+def terms():
+    return render_template("terms.html")
+
+
 @app.route("/")
 def index():
     return redirect(url_for("dashboard" if current_user.is_authenticated else "login"))

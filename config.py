@@ -15,6 +15,7 @@ class Config:
     REMEMBER_COOKIE_SECURE = SESSION_COOKIE_SECURE
     WTF_CSRF_TIME_LIMIT = 3600
     ALLOW_FACULTY_REGISTRATION = os.getenv("ALLOW_FACULTY_REGISTRATION", "false").lower() == "true"
+    FACULTY_ADMIN_EMAIL = os.getenv("FACULTY_ADMIN_EMAIL", "").strip().lower()
 
     SQLALCHEMY_DATABASE_URI = os.getenv(
         "DATABASE_URL",

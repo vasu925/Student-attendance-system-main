@@ -23,6 +23,9 @@
     <a class="nav-link-custom {% if request.endpoint == 'subjects' %}active{% endif %}" href="{{ url_for('subjects') }}"><i class="bi bi-book"></i><span>Subjects</span></a>
     <a class="nav-link-custom {% if request.endpoint == 'attendance' %}active{% endif %}" href="{{ url_for('attendance') }}"><i class="bi bi-calendar-check"></i><span>Attendance</span></a>
     <a class="nav-link-custom {% if request.endpoint == 'reports' %}active{% endif %}" href="{{ url_for('reports') }}"><i class="bi bi-bar-chart"></i><span>Reports</span></a>
+    {% if is_faculty_admin %}
+    <a class="nav-link-custom {% if request.endpoint == 'faculty_management' %}active{% endif %}" href="{{ url_for('faculty_management') }}"><i class="bi bi-person-gear"></i><span>Manage faculty</span></a>
+    {% endif %}
     {% endif %}
     <div class="sidebar-bottom">
       <div class="user-mini"><div class="avatar">{{ current_user.name[:1].upper() }}</div><div><strong>{{ current_user.name }}</strong><small>{{ 'Faculty account' if current_user.__class__.__name__ == 'Faculty' else 'Student account' }}</small></div></div>

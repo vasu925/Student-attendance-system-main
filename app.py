@@ -139,6 +139,17 @@ def terms():
     return render_template("terms.html")
 
 
+def faculty_required(view):
+    from functools import wraps
+    @wraps(view)
+    @login_required
+    def wrapped(*args, **kwargs):
+        if not isinstance(current_user, Faculty):
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
+
+
 @app.route("/")
 def index():
     return redirect(url_for("dashboard" if current_user.is_authenticated else "login"))
@@ -214,6 +225,13 @@ def logout():
 @app.route("/dashboard")
 @login_required
 def dashboard():
+    if isinstance(current_user, Student):
+        records = Attendance.query.filter_by(student_id=current_user.id).order_by(Attendance.attendance_date.desc()).all()
+        total = len(records)
+        present = sum(1 for record in records if record.status == "Present")
+        return render_template("student_dashboard.html", records=records, total=total, present=present)
+    if not isinstance(current_user, Faculty):
+        abort(403)
     student_count = Student.query.count()
     subject_count = Subject.query.count()
     today_records = Attendance.query.filter_by(attendance_date=date.today()).all()
@@ -229,7 +247,7 @@ def dashboard():
 
 
 @app.route("/students")
-@login_required
+@faculty_required
 def students():
     q = request.args.get("q", "").strip()
     query = Student.query
@@ -244,7 +262,7 @@ def students():
 
 @app.route("/students/add", methods=["GET", "POST"])
 @app.route("/students/<int:student_id>/edit", methods=["GET", "POST"])
-@login_required
+@faculty_required
 def student_form(student_id=None):
     student = db.session.get(Student, student_id) if student_id else Student()
     if student_id and not student:
@@ -257,8 +275,12 @@ def student_form(student_id=None):
         student.department = request.form.get("department", "").strip()
         student.year = request.form.get("year", "").strip()
         student.email = request.form.get("email", "").strip() or None
+        try:
+            student.date_of_birth = datetime.strptime(request.form.get("date_of_birth", ""), "%Y-%m-%d").date()
+        except ValueError:
+            student.date_of_birth = None
 
-        if not all([student.roll_number, student.name, student.department, student.year]):
+        if not all([student.roll_number, student.name, student.department, student.year, student.date_of_birth]):
             flash("Please complete all required fields.", "danger")
         else:
             existing = Student.query.filter_by(roll_number=student.roll_number).first()
@@ -274,7 +296,7 @@ def student_form(student_id=None):
 
 
 @app.route("/students/<int:student_id>/delete", methods=["POST"])
-@login_required
+@faculty_required
 def delete_student(student_id):
     student = db.session.get(Student, student_id)
     if student:
@@ -285,7 +307,7 @@ def delete_student(student_id):
 
 
 @app.route("/subjects", methods=["GET", "POST"])
-@login_required
+@faculty_required
 def subjects():
     if request.method == "POST":
         code = request.form.get("code", "").strip().upper()
@@ -304,7 +326,7 @@ def subjects():
 
 
 @app.route("/subjects/<int:subject_id>/delete", methods=["POST"])
-@login_required
+@faculty_required
 def delete_subject(subject_id):
     subject = db.session.get(Subject, subject_id)
     if subject:
@@ -315,7 +337,7 @@ def delete_subject(subject_id):
 
 
 @app.route("/attendance", methods=["GET", "POST"])
-@login_required
+@faculty_required
 def attendance():
     raw_date = request.values.get("attendance_date", date.today().isoformat())
     try:
@@ -396,7 +418,7 @@ def filtered_attendance_query():
 
 
 @app.route("/reports")
-@login_required
+@faculty_required
 def reports():
     query, start, end, subject_id = filtered_attendance_query()
     records = query.order_by(Attendance.attendance_date.desc(), Student.roll_number).all()
@@ -408,7 +430,7 @@ def reports():
 
 
 @app.route("/reports/export")
-@login_required
+@faculty_required
 def export_report():
     query, _, _, _ = filtered_attendance_query()
     output = io.StringIO()

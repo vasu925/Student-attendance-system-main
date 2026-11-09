@@ -3,9 +3,9 @@ import io
 import os
 import secrets
 import hashlib
+import json
 import logging
-import smtplib
-from email.message import EmailMessage
+from urllib.request import Request, urlopen
 from datetime import date, datetime, timedelta
 
 from flask import Flask, Response, abort, flash, redirect, render_template, request, url_for, send_from_directory, session
@@ -263,33 +263,38 @@ def password_reset_serializer():
 
 
 def send_password_reset_email(faculty, reset_url):
-    host = os.getenv("SMTP_HOST")
-    username = os.getenv("SMTP_USERNAME")
-    password = os.getenv("SMTP_PASSWORD")
-    sender = os.getenv("SMTP_FROM")
-    if not all([host, username, password, sender]):
-        app.logger.error("Password reset email is not configured: SMTP environment variables are missing.")
+    api_key = os.getenv("RESEND_API_KEY")
+    sender = os.getenv("RESEND_FROM")
+    if not api_key or not sender:
+        app.logger.error("Password reset email is not configured: Resend settings are missing.")
         return False
 
-    message = EmailMessage()
-    message["Subject"] = "Reset your AttendEase password"
-    message["From"] = sender
-    message["To"] = faculty.email
-    message.set_content(
-        "A password reset was requested for your AttendEase faculty account. "
-        "This link expires in 30 minutes and can only be used once. "
-        "If you did not request this, you can ignore this email.\\n\\n"
-        f"Reset your password: {reset_url}"
+    payload = {
+        "from": sender,
+        "to": [faculty.email],
+        "subject": "Reset your AttendEase password",
+        "text": (
+            "A password reset was requested for your AttendEase faculty account. "
+            "This link expires in 30 minutes and is valid only until your password changes. "
+            "If you did not request this, you can ignore this email.\\n\\n"
+            f"Reset your password: {reset_url}"
+        ),
+    }
+    request = Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "User-Agent": "AttendEase/1.0",
+        },
+        method="POST",
     )
     try:
-        port = int(os.getenv("SMTP_PORT", "587"))
-        with smtplib.SMTP(host, port, timeout=15) as server:
-            server.starttls()
-            server.login(username, password)
-            server.send_message(message)
-        return True
+        with urlopen(request, timeout=12) as response:
+            return 200 <= response.status < 300
     except Exception:
-        app.logger.exception("Unable to send AttendEase password reset email.")
+        app.logger.exception("Resend could not deliver an AttendEase password reset email.")
         return False
 
 
@@ -301,9 +306,16 @@ def forgot_password():
         email = request.form.get("email", "").strip().lower()
         faculty = Faculty.query.filter_by(email=email).first() if email else None
         if faculty:
-            token = password_reset_serializer().dumps({"faculty_id": faculty.id})
-            reset_url = url_for("reset_password", token=token, _external=True)
-            send_password_reset_email(faculty, reset_url)
+            token = password_reset_serializer().dumps({
+                "faculty_id": faculty.id,
+                "password_fingerprint": faculty.password_hash,
+            })
+            base_url = os.getenv("ATTENDEASE_BASE_URL", "").strip().rstrip("/")
+            if base_url.startswith("https://"):
+                reset_url = f"{base_url}{url_for('reset_password', token=token)}"
+                send_password_reset_email(faculty, reset_url)
+            else:
+                app.logger.error("Password reset disabled: ATTENDEASE_BASE_URL must be a trusted HTTPS URL.")
         # Do not disclose whether an account exists.
         flash("If an account exists for that email and email delivery is configured, a password reset link will be sent.", "info")
         return redirect(url_for("forgot_password"))
@@ -320,7 +332,7 @@ def reset_password(token):
         return redirect(url_for("forgot_password"))
 
     faculty = db.session.get(Faculty, faculty_id)
-    if not faculty:
+    if not faculty or data.get("password_fingerprint") != faculty.password_hash:
         flash("That password reset link is invalid or has expired. Please request a new one.", "warning")
         return redirect(url_for("forgot_password"))
 

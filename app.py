@@ -3,6 +3,9 @@ import io
 import os
 import secrets
 import hashlib
+import logging
+import smtplib
+from email.message import EmailMessage
 from datetime import date, datetime, timedelta
 
 from flask import Flask, Response, abort, flash, redirect, render_template, request, url_for, send_from_directory, session
@@ -14,6 +17,7 @@ from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import UniqueConstraint, or_
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
+from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 from config import Config
 
@@ -251,6 +255,88 @@ def login():
             return redirect(url_for("dashboard"))
         flash("Incorrect email or password.", "danger")
     return render_template("login.html")
+
+
+
+def password_reset_serializer():
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="attendease-password-reset")
+
+
+def send_password_reset_email(faculty, reset_url):
+    host = os.getenv("SMTP_HOST")
+    username = os.getenv("SMTP_USERNAME")
+    password = os.getenv("SMTP_PASSWORD")
+    sender = os.getenv("SMTP_FROM")
+    if not all([host, username, password, sender]):
+        app.logger.error("Password reset email is not configured: SMTP environment variables are missing.")
+        return False
+
+    message = EmailMessage()
+    message["Subject"] = "Reset your AttendEase password"
+    message["From"] = sender
+    message["To"] = faculty.email
+    message.set_content(
+        "A password reset was requested for your AttendEase faculty account. "
+        "This link expires in 30 minutes and can only be used once. "
+        "If you did not request this, you can ignore this email.\\n\\n"
+        f"Reset your password: {reset_url}"
+    )
+    try:
+        port = int(os.getenv("SMTP_PORT", "587"))
+        with smtplib.SMTP(host, port, timeout=15) as server:
+            server.starttls()
+            server.login(username, password)
+            server.send_message(message)
+        return True
+    except Exception:
+        app.logger.exception("Unable to send AttendEase password reset email.")
+        return False
+
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        if not consume_login_attempt("forgot-password", limit=5, window_minutes=15):
+            abort(429)
+        email = request.form.get("email", "").strip().lower()
+        faculty = Faculty.query.filter_by(email=email).first() if email else None
+        if faculty:
+            token = password_reset_serializer().dumps({"faculty_id": faculty.id})
+            reset_url = url_for("reset_password", token=token, _external=True)
+            send_password_reset_email(faculty, reset_url)
+        # Do not disclose whether an account exists.
+        flash("If an account exists for that email and email delivery is configured, a password reset link will be sent.", "info")
+        return redirect(url_for("forgot_password"))
+    return render_template("forgot_password.html")
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    try:
+        data = password_reset_serializer().loads(token, max_age=1800)
+        faculty_id = int(data["faculty_id"])
+    except (BadSignature, SignatureExpired, KeyError, TypeError, ValueError):
+        flash("That password reset link is invalid or has expired. Please request a new one.", "warning")
+        return redirect(url_for("forgot_password"))
+
+    faculty = db.session.get(Faculty, faculty_id)
+    if not faculty:
+        flash("That password reset link is invalid or has expired. Please request a new one.", "warning")
+        return redirect(url_for("forgot_password"))
+
+    if request.method == "POST":
+        password = request.form.get("password", "")
+        confirm = request.form.get("confirm_password", "")
+        if len(password) < 8:
+            flash("Choose a password with at least 8 characters.", "danger")
+        elif password != confirm:
+            flash("The passwords do not match.", "danger")
+        else:
+            faculty.set_password(password)
+            db.session.commit()
+            flash("Your password has been reset. Please sign in.", "success")
+            return redirect(url_for("login"))
+    return render_template("reset_password.html")
 
 
 @app.route("/student-attendance", methods=["GET", "POST"])

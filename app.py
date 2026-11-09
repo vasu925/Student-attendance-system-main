@@ -199,7 +199,13 @@ def clear_login_attempts(scope):
 
 @app.route("/")
 def index():
-    return redirect(url_for("dashboard" if current_user.is_authenticated else "login"))
+    # A fresh visit to the public app URL always starts at sign-in.
+    # This prevents a previously authenticated browser session from
+    # silently opening the faculty dashboard when the link is opened again.
+    if current_user.is_authenticated:
+        logout_user()
+    session.clear()
+    return redirect(url_for("login"))
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -229,8 +235,11 @@ def register():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    # Visiting the sign-in URL explicitly should show the sign-in form,
+    # not silently reuse an earlier authenticated session.
     if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
+        logout_user()
+        session.clear()
     if request.method == "POST":
         if not consume_login_attempt("faculty-login"):
             abort(429)

@@ -1,14 +1,18 @@
 import csv
 import io
 import os
-from datetime import date, datetime
+import secrets
+import hashlib
+from datetime import date, datetime, timedelta
 
-from flask import Flask, Response, flash, redirect, render_template, request, url_for
+from flask import Flask, Response, abort, flash, redirect, render_template, request, url_for, send_from_directory, session
 from flask_login import (
     LoginManager, UserMixin, current_user, login_required, login_user, logout_user
 )
 from flask_sqlalchemy import SQLAlchemy
+from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import UniqueConstraint, or_
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from config import Config
@@ -17,13 +21,29 @@ app = Flask(__name__)
 app.config.from_object(Config)
 
 db = SQLAlchemy(app)
+csrf = CSRFProtect(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 login_manager.login_message_category = "info"
 
 
+@app.after_request
+def apply_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if current_user.is_authenticated or request.endpoint in {"login", "register", "student_attendance", "student_attendance_logout"}:
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
 class Faculty(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
+
+    def get_id(self):
+        return f"faculty:{self.id}"
     name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
@@ -43,6 +63,21 @@ class Student(db.Model):
     year = db.Column(db.String(20), nullable=False)
     email = db.Column(db.String(120))
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    access_code = db.relationship("StudentAccessCode", back_populates="student", uselist=False, cascade="all, delete-orphan")
+
+
+class StudentAccessCode(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey("student.id", ondelete="CASCADE"), unique=True, nullable=False)
+    access_code_hash = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    student = db.relationship("Student", back_populates="access_code")
+
+
+class LoginThrottle(db.Model):
+    key = db.Column(db.String(64), primary_key=True)
+    window_started_at = db.Column(db.DateTime, nullable=False)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
 
 
 class Subject(db.Model):
@@ -71,12 +106,95 @@ class Attendance(db.Model):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(Faculty, int(user_id))
+    try:
+        account_type, raw_id = user_id.split(":", 1)
+        record_id = int(raw_id)
+    except (ValueError, AttributeError):
+        return None
+    if account_type == "faculty":
+        return db.session.get(Faculty, record_id)
+    return None
 
 
 @app.context_processor
 def inject_globals():
     return {"today": date.today()}
+
+
+@app.route("/manifest.json")
+def pwa_manifest():
+    return send_from_directory(app.root_path, "manifest.json", mimetype="application/manifest+json")
+
+
+@app.route("/sw.js")
+def pwa_service_worker():
+    response = send_from_directory(app.root_path, "sw.js", mimetype="application/javascript")
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.route("/privacy")
+def privacy():
+    return render_template("privacy.html")
+
+
+@app.route("/terms")
+def terms():
+    return render_template("terms.html")
+
+
+def faculty_required(view):
+    from functools import wraps
+    @wraps(view)
+    @login_required
+    def wrapped(*args, **kwargs):
+        if not isinstance(current_user, Faculty):
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def _throttle_key(scope):
+    # Store only a one-way digest of the client address and route scope.
+    address = request.remote_addr or "unknown"
+    return hashlib.sha256(f"{scope}:{address}".encode("utf-8")).hexdigest()
+
+
+def consume_login_attempt(scope, limit=10, window_minutes=15):
+    """Database-backed throttle shared across serverless instances."""
+    key = _throttle_key(scope)
+    now = datetime.utcnow()
+    cutoff = now - timedelta(minutes=window_minutes)
+    for attempt in range(2):
+        try:
+            bucket = db.session.query(LoginThrottle).filter_by(key=key).with_for_update().first()
+            if bucket and bucket.window_started_at > cutoff:
+                if bucket.attempts >= limit:
+                    db.session.rollback()
+                    return False
+                bucket.attempts += 1
+            else:
+                if bucket:
+                    bucket.window_started_at = now
+                    bucket.attempts = 1
+                else:
+                    db.session.add(LoginThrottle(key=key, window_started_at=now, attempts=1))
+            db.session.commit()
+            return True
+        except IntegrityError:
+            db.session.rollback()
+            if attempt:
+                return False
+        except Exception:
+            db.session.rollback()
+            raise
+    return False
+
+
+def clear_login_attempts(scope):
+    db.session.query(LoginThrottle).filter_by(key=_throttle_key(scope)).delete()
+    db.session.commit()
 
 
 @app.route("/")
@@ -88,6 +206,8 @@ def index():
 def register():
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
+    if not app.config.get("ALLOW_FACULTY_REGISTRATION", False):
+        abort(404)
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         email = request.form.get("email", "").strip().lower()
@@ -112,15 +232,53 @@ def login():
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
     if request.method == "POST":
+        if not consume_login_attempt("faculty-login"):
+            abort(429)
         email = request.form.get("email", "").strip().lower()
-        password = request.form.get("password", "")
         faculty = Faculty.query.filter_by(email=email).first()
-        if faculty and faculty.check_password(password):
+        if faculty and faculty.check_password(request.form.get("password", "")):
+            clear_login_attempts("faculty-login")
             login_user(faculty)
             return redirect(url_for("dashboard"))
         flash("Incorrect email or password.", "danger")
     return render_template("login.html")
 
+
+@app.route("/student-attendance", methods=["GET", "POST"])
+def student_attendance():
+    student = None
+    student_id = session.get("student_view_id")
+    if student_id:
+        student = db.session.get(Student, student_id)
+        if not student:
+            session.pop("student_view_id", None)
+    if request.method == "POST":
+        if not consume_login_attempt("student-lookup"):
+            abort(429)
+        session.pop("student_view_id", None)
+        student = None
+        roll = request.form.get("roll_number", "").strip()
+        code = request.form.get("access_code", "").strip()
+        candidate = Student.query.filter_by(roll_number=roll).first()
+        if candidate and candidate.access_code and check_password_hash(candidate.access_code.access_code_hash, code):
+            clear_login_attempts("student-lookup")
+            session["student_view_id"] = candidate.id
+            session.modified = True
+            return redirect(url_for("student_attendance"))
+        flash("Those details could not be verified. Check your roll number and private access code.", "danger")
+    if student:
+        records = Attendance.query.filter_by(student_id=student.id).order_by(Attendance.attendance_date.desc()).all()
+        total = len(records)
+        present = sum(1 for record in records if record.status == "Present")
+        return render_template("student_dashboard.html", student=student, records=records, total=total, present=present)
+    return render_template("student_lookup.html")
+
+
+@app.route("/student-attendance/logout", methods=["POST"])
+def student_attendance_logout():
+    session.pop("student_view_id", None)
+    flash("You have left the student attendance view.", "info")
+    return redirect(url_for("student_attendance"))
 
 @app.route("/logout", methods=["POST"])
 @login_required
@@ -133,6 +291,13 @@ def logout():
 @app.route("/dashboard")
 @login_required
 def dashboard():
+    if isinstance(current_user, Student):
+        records = Attendance.query.filter_by(student_id=current_user.id).order_by(Attendance.attendance_date.desc()).all()
+        total = len(records)
+        present = sum(1 for record in records if record.status == "Present")
+        return render_template("student_dashboard.html", records=records, total=total, present=present)
+    if not isinstance(current_user, Faculty):
+        abort(403)
     student_count = Student.query.count()
     subject_count = Subject.query.count()
     today_records = Attendance.query.filter_by(attendance_date=date.today()).all()
@@ -148,7 +313,7 @@ def dashboard():
 
 
 @app.route("/students")
-@login_required
+@faculty_required
 def students():
     q = request.args.get("q", "").strip()
     query = Student.query
@@ -163,7 +328,7 @@ def students():
 
 @app.route("/students/add", methods=["GET", "POST"])
 @app.route("/students/<int:student_id>/edit", methods=["GET", "POST"])
-@login_required
+@faculty_required
 def student_form(student_id=None):
     student = db.session.get(Student, student_id) if student_id else Student()
     if student_id and not student:
@@ -171,6 +336,7 @@ def student_form(student_id=None):
         return redirect(url_for("students"))
 
     if request.method == "POST":
+        is_new = student.id is None
         student.roll_number = request.form.get("roll_number", "").strip()
         student.name = request.form.get("name", "").strip()
         student.department = request.form.get("department", "").strip()
@@ -184,16 +350,39 @@ def student_form(student_id=None):
             if existing and existing.id != student.id:
                 flash("That roll number is already in use.", "danger")
             else:
+                new_access_code = secrets.token_urlsafe(9) if is_new else None
                 db.session.add(student)
+                if new_access_code:
+                    db.session.flush()
+                    student.access_code = StudentAccessCode(access_code_hash=generate_password_hash(new_access_code))
                 db.session.commit()
-                flash("Student details saved.", "success")
+                if new_access_code:
+                    flash(f"Student saved. Give this private access code to the student now. It is shown only once: {new_access_code}", "success")
+                else:
+                    flash("Student details saved.", "success")
                 return redirect(url_for("students"))
 
     return render_template("student_form.html", student=student)
 
 
+@app.route("/students/<int:student_id>/access-code", methods=["POST"])
+@faculty_required
+def regenerate_student_access_code(student_id):
+    student = db.session.get(Student, student_id)
+    if not student:
+        abort(404)
+    code = secrets.token_urlsafe(9)
+    if student.access_code:
+        student.access_code.access_code_hash = generate_password_hash(code)
+    else:
+        student.access_code = StudentAccessCode(access_code_hash=generate_password_hash(code))
+    db.session.commit()
+    flash(f"New private access code for {student.name}. Share it directly with the student. It is shown only once: {code}", "success")
+    return redirect(url_for("students"))
+
+
 @app.route("/students/<int:student_id>/delete", methods=["POST"])
-@login_required
+@faculty_required
 def delete_student(student_id):
     student = db.session.get(Student, student_id)
     if student:
@@ -204,7 +393,7 @@ def delete_student(student_id):
 
 
 @app.route("/subjects", methods=["GET", "POST"])
-@login_required
+@faculty_required
 def subjects():
     if request.method == "POST":
         code = request.form.get("code", "").strip().upper()
@@ -223,7 +412,7 @@ def subjects():
 
 
 @app.route("/subjects/<int:subject_id>/delete", methods=["POST"])
-@login_required
+@faculty_required
 def delete_subject(subject_id):
     subject = db.session.get(Subject, subject_id)
     if subject:
@@ -234,7 +423,7 @@ def delete_subject(subject_id):
 
 
 @app.route("/attendance", methods=["GET", "POST"])
-@login_required
+@faculty_required
 def attendance():
     raw_date = request.values.get("attendance_date", date.today().isoformat())
     try:
@@ -315,7 +504,7 @@ def filtered_attendance_query():
 
 
 @app.route("/reports")
-@login_required
+@faculty_required
 def reports():
     query, start, end, subject_id = filtered_attendance_query()
     records = query.order_by(Attendance.attendance_date.desc(), Student.roll_number).all()
@@ -327,7 +516,7 @@ def reports():
 
 
 @app.route("/reports/export")
-@login_required
+@faculty_required
 def export_report():
     query, _, _, _ = filtered_attendance_query()
     output = io.StringIO()

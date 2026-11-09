@@ -50,7 +50,7 @@ A responsive college attendance application built with **Python Flask** and **My
    python app.py
    ```
 
-6. Open `http://127.0.0.1:5000` and create your faculty account.
+6. Open `http://127.0.0.1:5000`. Faculty accounts must be provisioned through an authorized process; public faculty self-registration is disabled by default.
 
 ## Project structure
 ```text
@@ -68,5 +68,13 @@ student-attendance-management-system/
 - Set a long, random `SECRET_KEY`.
 - Restrict faculty registration to authorized staff.
 - Use HTTPS and a production WSGI server.
-- Add CSRF protection and role-based administration before exposing the app publicly.
+- CSRF protection is enabled for form submissions.
+- Faculty self-registration is disabled by default; provision accounts through a controlled administrator workflow.
+- Secure session cookies and no-store headers protect authenticated responses.
+- Faculty sign in with their provisioned email and password. Students use the separate read-only `/student-attendance` page with their roll number and a private access code issued by faculty.
+- Student access codes are generated randomly, stored as password hashes in a separate database table, and shown to faculty only once when created or reset. `db.create_all()` creates this new table automatically.
+- Students can only view their own attendance. Student-facing routes do not expose attendance write operations.
+- Do not enter real student details or publish attendance until the college authorizes the processing and disclosure.
+- Faculty login and student lookup use a database-backed limit of 10 attempts per client address per 15-minute window; verify this behavior on the production database.
+- Run automated tests, verify database backups and restore procedures, and complete a security review before public production use.
 - Never commit `.env` or real credentials.

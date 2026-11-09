@@ -3,11 +3,12 @@ import io
 import os
 from datetime import date, datetime
 
-from flask import Flask, Response, flash, redirect, render_template, request, url_for, send_from_directory
+from flask import Flask, Response, abort, flash, redirect, render_template, request, url_for, send_from_directory
 from flask_login import (
     LoginManager, UserMixin, current_user, login_required, login_user, logout_user
 )
 from flask_sqlalchemy import SQLAlchemy
+from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import UniqueConstraint, or_
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -17,9 +18,22 @@ app = Flask(__name__)
 app.config.from_object(Config)
 
 db = SQLAlchemy(app)
+csrf = CSRFProtect(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 login_manager.login_message_category = "info"
+
+
+@app.after_request
+def apply_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if current_user.is_authenticated or request.endpoint in {"login", "register"}:
+        response.headers["Cache-Control"] = "no-store, private"
+        response.headers["Pragma"] = "no-cache"
+    return response
 
 
 class Faculty(UserMixin, db.Model):
@@ -111,6 +125,8 @@ def index():
 def register():
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
+    if not app.config.get("ALLOW_FACULTY_REGISTRATION", False):
+        abort(404)
     if request.method == "POST":
         name = request.form.get("name", "").strip()
         email = request.form.get("email", "").strip().lower()

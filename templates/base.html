@@ -29,8 +29,9 @@
       <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="nav-link-custom logout-button"><i class="bi bi-box-arrow-left"></i><span>Sign out</span></button></form>
     </div>
   </aside>
+  <button class="sidebar-backdrop" id="sidebarBackdrop" type="button" aria-label="Close navigation"></button>
   <main class="main-area">
-    <header class="topbar"><span class="text-muted small">COLLEGE MANAGEMENT / <strong>{{ request.endpoint|replace('_',' ')|upper }}</strong></span><span class="date-pill"><i class="bi bi-calendar3"></i> {{ today.strftime('%d %b %Y') }}</span></header>
+    <header class="topbar"><button class="mobile-menu-toggle" id="mobileMenuToggle" type="button" aria-label="Open navigation" aria-controls="appSidebar" aria-expanded="false"><i class="bi bi-list"></i></button><span class="text-muted small topbar-context">COLLEGE MANAGEMENT / <strong>{{ request.endpoint|replace('_',' ')|upper }}</strong></span><span class="date-pill"><i class="bi bi-calendar3"></i> {{ today.strftime('%d %b %Y') }}</span></header>
     <div class="content-wrap">
 {% else %}
 <div class="auth-background">
@@ -56,11 +57,19 @@
 <script>
 (() => {
  const sidebar=document.getElementById("appSidebar"), toggle=document.getElementById("sidebarToggle");
- if(!sidebar||!toggle)return;
+ const mobileToggle=document.getElementById("mobileMenuToggle"), backdrop=document.getElementById("sidebarBackdrop");
+ if(!sidebar)return;
  const key="attendance-sidebar-collapsed";
- const apply=collapsed=>{sidebar.classList.toggle("collapsed",collapsed);toggle.setAttribute("aria-expanded",String(!collapsed));toggle.setAttribute("aria-label",collapsed?"Expand navigation":"Collapse navigation");};
+ const apply=collapsed=>{if(!toggle)return;sidebar.classList.toggle("collapsed",collapsed);toggle.setAttribute("aria-expanded",String(!collapsed));toggle.setAttribute("aria-label",collapsed?"Expand navigation":"Collapse navigation");};
  apply(localStorage.getItem(key)==="true");
- toggle.addEventListener("click",()=>{const collapsed=!sidebar.classList.contains("collapsed");apply(collapsed);localStorage.setItem(key,String(collapsed));});
+ toggle?.addEventListener("click",()=>{const collapsed=!sidebar.classList.contains("collapsed");apply(collapsed);localStorage.setItem(key,String(collapsed));});
+ const openMenu=()=>{sidebar.classList.add("mobile-open");backdrop?.classList.add("visible");mobileToggle?.setAttribute("aria-expanded","true");mobileToggle?.setAttribute("aria-label","Close navigation");document.body.classList.add("menu-open");};
+ const closeMenu=()=>{sidebar.classList.remove("mobile-open");backdrop?.classList.remove("visible");mobileToggle?.setAttribute("aria-expanded","false");mobileToggle?.setAttribute("aria-label","Open navigation");document.body.classList.remove("menu-open");};
+ mobileToggle?.addEventListener("click",()=>sidebar.classList.contains("mobile-open")?closeMenu():openMenu());
+ backdrop?.addEventListener("click",closeMenu);
+ sidebar.querySelectorAll(".nav-link-custom").forEach(link=>link.addEventListener("click",closeMenu));
+ document.addEventListener("keydown",event=>{if(event.key==="Escape")closeMenu();});
+ window.addEventListener("resize",()=>{if(window.innerWidth>900)closeMenu();});
 })();
 </script>
 </body>

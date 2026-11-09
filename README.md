@@ -75,5 +75,6 @@ student-attendance-management-system/
 - Student access codes are generated randomly, stored as password hashes in a separate database table, and shown to faculty only once when created or reset. `db.create_all()` creates this new table automatically.
 - Students can only view their own attendance. Student-facing routes do not expose attendance write operations.
 - Do not enter real student details or publish attendance until the college authorizes the processing and disclosure.
-- Before public production use, add persistent rate limiting, run automated tests, verify database backups, and complete a security review.
+- Faculty login and student lookup use a database-backed limit of 10 attempts per client address per 15-minute window; verify this behavior on the production database.
+- Run automated tests, verify database backups and restore procedures, and complete a security review before public production use.
 - Never commit `.env` or real credentials.

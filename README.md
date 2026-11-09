@@ -3,7 +3,8 @@
 A responsive college attendance application built with **Python Flask** and **MySQL**.
 
 ## Features
-- Faculty registration, login and logout
+- Faculty login and logout
+- Administrator-controlled faculty account creation
 - Secure password hashing and session-based authentication
 - Dashboard with student, subject and attendance statistics
 - Add, edit, search and delete students
@@ -50,7 +51,8 @@ A responsive college attendance application built with **Python Flask** and **My
    python app.py
    ```
 
-6. Open `http://127.0.0.1:5000`. Faculty accounts must be provisioned through an authorized process; public faculty self-registration is disabled by default.
+6. Set `FACULTY_ADMIN_EMAIL` to the email address of an existing faculty account that should administer faculty accounts. Keep `ALLOW_FACULTY_REGISTRATION=false`.
+7. Open `http://127.0.0.1:5000`. Sign in with the existing administrator faculty account. The **Manage faculty** page lets that account create additional faculty accounts with temporary passwords.
 
 ## Project structure
 ```text
@@ -66,10 +68,10 @@ student-attendance-management-system/
 
 ## Before real deployment
 - Set a long, random `SECRET_KEY`.
-- Restrict faculty registration to authorized staff.
+- Set `FACULTY_ADMIN_EMAIL` to an existing faculty account email to enable the administrator-only faculty management page. Do not enable public self-registration.
 - Use HTTPS and a production WSGI server.
 - CSRF protection is enabled for form submissions.
-- Faculty self-registration is disabled by default; provision accounts through a controlled administrator workflow.
+- Faculty self-registration is disabled by default. Only the existing faculty account named by `FACULTY_ADMIN_EMAIL` can create additional faculty accounts. This uses an environment-based allowlist and does not add or alter database columns.
 - Secure session cookies and no-store headers protect authenticated responses.
 - Faculty sign in with their provisioned email and password. Students use the separate read-only `/student-attendance` page with their roll number and a private access code issued by faculty.
 - Student access codes are generated randomly, stored as password hashes in a separate database table, and shown to faculty only once when created or reset. `db.create_all()` creates this new table automatically.

@@ -71,5 +71,9 @@ student-attendance-management-system/
 - CSRF protection is enabled for form submissions.
 - Faculty self-registration is disabled by default; provision accounts through a controlled administrator workflow.
 - Secure session cookies and no-store headers protect authenticated responses.
-- Faculty sign in with their provisioned email and password. Students use the separate read-only `/student-attendance` page with their roll number and a private access code issued by faculty.\n- Student access codes are generated randomly, stored as password hashes in a separate database table, and shown to faculty only once when created or reset. `db.create_all()` creates this new table automatically.\n- Students can only view their own attendance. Student-facing routes do not expose attendance write operations.\n- Do not enter real student details or publish attendance until the college authorizes the processing and disclosure.\n- Before public production use, add persistent rate limiting, run automated tests, verify database backups, and complete a security review.
+- Faculty sign in with their provisioned email and password. Students use the separate read-only `/student-attendance` page with their roll number and a private access code issued by faculty.
+- Student access codes are generated randomly, stored as password hashes in a separate database table, and shown to faculty only once when created or reset. `db.create_all()` creates this new table automatically.
+- Students can only view their own attendance. Student-facing routes do not expose attendance write operations.
+- Do not enter real student details or publish attendance until the college authorizes the processing and disclosure.
+- Before public production use, add persistent rate limiting, run automated tests, verify database backups, and complete a security review.
 - Never commit `.env` or real credentials.

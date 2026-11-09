@@ -201,6 +201,7 @@ def student_attendance():
             session.pop("student_view_id", None)
     if request.method == "POST":
         session.pop("student_view_id", None)
+        student = None
         roll = request.form.get("roll_number", "").strip()
         code = request.form.get("access_code", "").strip()
         candidate = Student.query.filter_by(roll_number=roll).first()

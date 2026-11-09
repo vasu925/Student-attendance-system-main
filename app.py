@@ -2,7 +2,8 @@ import csv
 import io
 import os
 import secrets
-from datetime import date, datetime
+import hashlib
+from datetime import date, datetime, timedelta
 
 from flask import Flask, Response, abort, flash, redirect, render_template, request, url_for, send_from_directory, session
 from flask_login import (
@@ -11,6 +12,7 @@ from flask_login import (
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import UniqueConstraint, or_
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from config import Config
@@ -70,6 +72,12 @@ class StudentAccessCode(db.Model):
     access_code_hash = db.Column(db.String(255), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     student = db.relationship("Student", back_populates="access_code")
+
+
+class LoginThrottle(db.Model):
+    key = db.Column(db.String(64), primary_key=True)
+    window_started_at = db.Column(db.DateTime, nullable=False)
+    attempts = db.Column(db.Integer, nullable=False, default=0)
 
 
 class Subject(db.Model):
@@ -147,6 +155,48 @@ def faculty_required(view):
     return wrapped
 
 
+def _throttle_key(scope):
+    # Store only a one-way digest of the client address and route scope.
+    address = request.remote_addr or "unknown"
+    return hashlib.sha256(f"{scope}:{address}".encode("utf-8")).hexdigest()
+
+
+def consume_login_attempt(scope, limit=10, window_minutes=15):
+    """Database-backed throttle shared across serverless instances."""
+    key = _throttle_key(scope)
+    now = datetime.utcnow()
+    cutoff = now - timedelta(minutes=window_minutes)
+    for attempt in range(2):
+        try:
+            bucket = db.session.query(LoginThrottle).filter_by(key=key).with_for_update().first()
+            if bucket and bucket.window_started_at > cutoff:
+                if bucket.attempts >= limit:
+                    db.session.rollback()
+                    return False
+                bucket.attempts += 1
+            else:
+                if bucket:
+                    bucket.window_started_at = now
+                    bucket.attempts = 1
+                else:
+                    db.session.add(LoginThrottle(key=key, window_started_at=now, attempts=1))
+            db.session.commit()
+            return True
+        except IntegrityError:
+            db.session.rollback()
+            if attempt:
+                return False
+        except Exception:
+            db.session.rollback()
+            raise
+    return False
+
+
+def clear_login_attempts(scope):
+    db.session.query(LoginThrottle).filter_by(key=_throttle_key(scope)).delete()
+    db.session.commit()
+
+
 @app.route("/")
 def index():
     return redirect(url_for("dashboard" if current_user.is_authenticated else "login"))
@@ -182,9 +232,12 @@ def login():
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
     if request.method == "POST":
+        if not consume_login_attempt("faculty-login"):
+            abort(429)
         email = request.form.get("email", "").strip().lower()
         faculty = Faculty.query.filter_by(email=email).first()
         if faculty and faculty.check_password(request.form.get("password", "")):
+            clear_login_attempts("faculty-login")
             login_user(faculty)
             return redirect(url_for("dashboard"))
         flash("Incorrect email or password.", "danger")
@@ -200,12 +253,15 @@ def student_attendance():
         if not student:
             session.pop("student_view_id", None)
     if request.method == "POST":
+        if not consume_login_attempt("student-lookup"):
+            abort(429)
         session.pop("student_view_id", None)
         student = None
         roll = request.form.get("roll_number", "").strip()
         code = request.form.get("access_code", "").strip()
         candidate = Student.query.filter_by(roll_number=roll).first()
         if candidate and candidate.access_code and check_password_hash(candidate.access_code.access_code_hash, code):
+            clear_login_attempts("student-lookup")
             session["student_view_id"] = candidate.id
             session.modified = True
             return redirect(url_for("student_attendance"))

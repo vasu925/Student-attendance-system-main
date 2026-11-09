@@ -55,13 +55,21 @@ class Faculty(UserMixin, db.Model):
 
 class Student(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    access_code_hash = db.Column(db.String(255), nullable=True)
     roll_number = db.Column(db.String(30), unique=True, nullable=False, index=True)
     name = db.Column(db.String(100), nullable=False)
     department = db.Column(db.String(80), nullable=False)
     year = db.Column(db.String(20), nullable=False)
     email = db.Column(db.String(120))
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    access_code = db.relationship("StudentAccessCode", back_populates="student", uselist=False, cascade="all, delete-orphan")
+
+
+class StudentAccessCode(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    student_id = db.Column(db.Integer, db.ForeignKey("student.id", ondelete="CASCADE"), unique=True, nullable=False)
+    access_code_hash = db.Column(db.String(255), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    student = db.relationship("Student", back_populates="access_code")
 
 
 class Subject(db.Model):
@@ -195,7 +203,7 @@ def student_attendance():
         roll = request.form.get("roll_number", "").strip()
         code = request.form.get("access_code", "").strip()
         candidate = Student.query.filter_by(roll_number=roll).first()
-        if candidate and candidate.access_code_hash and check_password_hash(candidate.access_code_hash, code):
+        if candidate and candidate.access_code and check_password_hash(candidate.access_code.access_code_hash, code):
             session["student_view_id"] = candidate.id
             session.modified = True
             return redirect(url_for("student_attendance"))
@@ -285,9 +293,10 @@ def student_form(student_id=None):
                 flash("That roll number is already in use.", "danger")
             else:
                 new_access_code = secrets.token_urlsafe(9) if is_new else None
-                if new_access_code:
-                    student.access_code_hash = generate_password_hash(new_access_code)
                 db.session.add(student)
+                if new_access_code:
+                    db.session.flush()
+                    student.access_code = StudentAccessCode(access_code_hash=generate_password_hash(new_access_code))
                 db.session.commit()
                 if new_access_code:
                     flash(f"Student saved. Give this private access code to the student now. It is shown only once: {new_access_code}", "success")
@@ -305,7 +314,10 @@ def regenerate_student_access_code(student_id):
     if not student:
         abort(404)
     code = secrets.token_urlsafe(9)
-    student.access_code_hash = generate_password_hash(code)
+    if student.access_code:
+        student.access_code.access_code_hash = generate_password_hash(code)
+    else:
+        student.access_code = StudentAccessCode(access_code_hash=generate_password_hash(code))
     db.session.commit()
     flash(f"New private access code for {student.name}. Share it directly with the student. It is shown only once: {code}", "success")
     return redirect(url_for("students"))

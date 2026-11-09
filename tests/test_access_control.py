@@ -54,3 +54,10 @@ def test_faculty_routes_require_faculty_login(client):
     assert client.get("/students").status_code in (302, 401)
     assert client.get("/subjects").status_code in (302, 401)
     assert client.get("/reports").status_code in (302, 401)
+
+
+def test_database_backed_login_throttle_blocks_after_ten_attempts(client):
+    from app import consume_login_attempt
+    with client.application.app_context():
+        assert all(consume_login_attempt("test-login") for _ in range(10))
+        assert consume_login_attempt("test-login") is False

@@ -31,7 +31,7 @@ def apply_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    if current_user.is_authenticated or request.endpoint in {"login", "register", "student_attendance"}:
+    if current_user.is_authenticated or request.endpoint in {"login", "register", "student_attendance", "student_attendance_logout"}:
         response.headers["Cache-Control"] = "no-store, private"
         response.headers["Pragma"] = "no-cache"
     return response

@@ -38,6 +38,9 @@ def apply_security_headers(response):
 
 class Faculty(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
+
+    def get_id(self):
+        return f"faculty:{self.id}"
     name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False, index=True)
     password_hash = db.Column(db.String(255), nullable=False)
@@ -49,8 +52,19 @@ class Faculty(UserMixin, db.Model):
         return check_password_hash(self.password_hash, password)
 
 
-class Student(db.Model):
+class Student(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    date_of_birth = db.Column(db.Date, nullable=True)
+    password_hash = db.Column(db.String(255), nullable=True)
+
+    def get_id(self):
+        return f"student:{self.id}"
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return bool(self.password_hash) and check_password_hash(self.password_hash, password)
     roll_number = db.Column(db.String(30), unique=True, nullable=False, index=True)
     name = db.Column(db.String(100), nullable=False)
     department = db.Column(db.String(80), nullable=False)
@@ -85,7 +99,16 @@ class Attendance(db.Model):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(Faculty, int(user_id))
+    try:
+        account_type, raw_id = user_id.split(":", 1)
+        record_id = int(raw_id)
+    except (ValueError, AttributeError):
+        return None
+    if account_type == "faculty":
+        return db.session.get(Faculty, record_id)
+    if account_type == "student":
+        return db.session.get(Student, record_id)
+    return None
 
 
 @app.context_processor
@@ -151,15 +174,34 @@ def login():
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
     if request.method == "POST":
-        email = request.form.get("email", "").strip().lower()
-        password = request.form.get("password", "")
-        faculty = Faculty.query.filter_by(email=email).first()
-        if faculty and faculty.check_password(password):
-            login_user(faculty)
-            return redirect(url_for("dashboard"))
-        flash("Incorrect email or password.", "danger")
+        if request.form.get("account_type") == "student":
+            roll = request.form.get("roll_number", "").strip()
+            student = Student.query.filter_by(roll_number=roll).first()
+            if student and student.password_hash:
+                if student.check_password(request.form.get("student_password", "")):
+                    login_user(student)
+                    return redirect(url_for("dashboard"))
+            elif student and not student.password_hash:
+                try:
+                    dob = datetime.strptime(request.form.get("date_of_birth", ""), "%Y-%m-%d").date()
+                except ValueError:
+                    dob = None
+                first = request.form.get("new_password", "")
+                second = request.form.get("confirm_password", "")
+                if dob and student.date_of_birth == dob and len(first) >= 12 and first == second:
+                    student.set_password(first)
+                    db.session.commit()
+                    login_user(student)
+                    return redirect(url_for("dashboard"))
+            flash("Unable to sign in. Check your details or contact the college administrator.", "danger")
+        else:
+            email = request.form.get("email", "").strip().lower()
+            faculty = Faculty.query.filter_by(email=email).first()
+            if faculty and faculty.check_password(request.form.get("password", "")):
+                login_user(faculty)
+                return redirect(url_for("dashboard"))
+            flash("Incorrect email or password.", "danger")
     return render_template("login.html")
-
 
 @app.route("/logout", methods=["POST"])
 @login_required

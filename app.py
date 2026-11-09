@@ -3,7 +3,7 @@ import io
 import os
 from datetime import date, datetime
 
-from flask import Flask, Response, flash, redirect, render_template, request, url_for
+from flask import Flask, Response, flash, redirect, render_template, request, url_for, send_from_directory
 from flask_login import (
     LoginManager, UserMixin, current_user, login_required, login_user, logout_user
 )
@@ -77,6 +77,19 @@ def load_user(user_id):
 @app.context_processor
 def inject_globals():
     return {"today": date.today()}
+
+
+@app.route("/manifest.json")
+def pwa_manifest():
+    return send_from_directory(app.root_path, "manifest.json", mimetype="application/manifest+json")
+
+
+@app.route("/sw.js")
+def pwa_service_worker():
+    response = send_from_directory(app.root_path, "sw.js", mimetype="application/javascript")
+    response.headers["Service-Worker-Allowed"] = "/"
+    response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 @app.route("/")

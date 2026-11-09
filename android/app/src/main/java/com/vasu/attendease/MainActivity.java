@@ -16,7 +16,6 @@ import android.widget.FrameLayout;
 
 public class MainActivity extends Activity {
     private static final String HOME = "https://attendease-rishi-6adf.vercel.app/";
-    private static final String HOST = "attendease-rishi-6adf.vercel.app";
     private WebView webView;
     private ProgressBar progress;
 
@@ -42,6 +41,10 @@ public class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(false);
+        // Keep links and pop-up navigation in this app's WebView.
+        settings.setSupportMultipleWindows(false);
+        settings.setJavaScriptCanOpenWindowsAutomatically(false);
+
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
 
@@ -51,15 +54,29 @@ public class MainActivity extends Activity {
                 progress.setVisibility(value >= 100 ? View.GONE : View.VISIBLE);
             }
         });
+
         webView.setWebViewClient(new WebViewClient() {
-            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                Uri uri = request.getUrl();
-                if ("https".equalsIgnoreCase(uri.getScheme()) && HOST.equalsIgnoreCase(uri.getHost())) {
+            private boolean handleUrl(Uri uri) {
+                String scheme = uri.getScheme();
+                // Keep all normal web navigation inside AttendEase, including
+                // redirects to sign-in or other HTTPS pages.
+                if ("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme)) {
                     return false;
                 }
-                try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); }
-                catch (Exception ignored) { }
+                // Phone, email and other non-web links can use their Android apps.
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW, uri));
+                } catch (Exception ignored) { }
                 return true;
+            }
+
+            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                return handleUrl(request.getUrl());
+            }
+
+            @SuppressWarnings("deprecation")
+            @Override public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return handleUrl(Uri.parse(url));
             }
         });
 

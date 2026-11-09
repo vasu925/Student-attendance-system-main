@@ -1,4 +1,46 @@
 {% extends "base.html" %}{% block title %}Sign in{% endblock %}{% block content %}
-<div class="auth-card"><div class="auth-logo"><i class="bi bi-mortarboard-fill"></i></div><p class="eyebrow text-center">WELCOME BACK</p><h1 class="auth-title">Sign in to AttendEase</h1><p class="text-muted text-center mb-4">Manage classroom attendance in one place.</p>
-<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><div class="mb-3"><label class="form-label">Email address</label><input class="form-control form-control-lg" type="email" name="email" required placeholder="you@college.edu"></div><div class="mb-4"><label class="form-label">Password</label><input class="form-control form-control-lg" type="password" name="password" required placeholder="Your password"></div><button class="btn btn-primary btn-lg w-100">Sign in <i class="bi bi-arrow-right ms-1"></i></button></form>
-<p class="text-center text-muted mt-4 mb-0">Accounts are issued by your system administrator.</p></div>{% endblock %}
+<div class="auth-card">
+  <div class="auth-logo"><i class="bi bi-mortarboard-fill"></i></div>
+  <p class="eyebrow text-center">ATTENDEASE</p>
+  <h1 class="auth-title">Sign in</h1>
+  <p class="text-muted text-center mb-4">Choose your account type to continue.</p>
+  <div class="d-flex gap-2 mb-4">
+    <button class="btn btn-primary flex-fill" type="button" id="facultyTab">Faculty</button>
+    <button class="btn btn-outline-primary flex-fill" type="button" id="studentTab">Student</button>
+  </div>
+  <form method="post" id="facultyForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="account_type" value="faculty">
+    <div class="mb-3"><label class="form-label">Email address</label><input class="form-control form-control-lg" type="email" name="email" required autocomplete="username" placeholder="you@college.edu"></div>
+    <div class="mb-4"><label class="form-label">Password</label><input class="form-control form-control-lg" type="password" name="password" required autocomplete="current-password"></div>
+    <button class="btn btn-primary btn-lg w-100">Faculty sign in</button>
+  </form>
+  <form method="post" id="studentForm" hidden>
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="account_type" value="student">
+    <div class="mb-3"><label class="form-label">Roll number</label><input class="form-control form-control-lg" name="roll_number" autocomplete="username" placeholder="Enter your college roll number"></div>
+    <div class="mb-3"><label class="form-label">Password</label><input class="form-control" type="password" name="student_password" autocomplete="current-password" placeholder="For students who have already activated their account"></div>
+    <hr>
+    <p class="small text-muted">First time here? Enter your date of birth and create a password. Your college must have your correct date of birth on record.</p>
+    <div class="mb-3"><label class="form-label">Date of birth</label><input class="form-control" type="date" name="date_of_birth"></div>
+    <div class="mb-3"><label class="form-label">Create password</label><input class="form-control" type="password" name="new_password" minlength="12" autocomplete="new-password" placeholder="At least 12 characters"></div>
+    <div class="mb-4"><label class="form-label">Confirm password</label><input class="form-control" type="password" name="confirm_password" minlength="12" autocomplete="new-password"></div>
+    <button class="btn btn-primary btn-lg w-100">Student sign in / activate account</button>
+  </form>
+  <p class="text-center text-muted mt-4 mb-0">If your details are not recognized, contact your college administrator.</p>
+</div>
+<script>
+(() => {
+ const faculty=document.getElementById("facultyForm"), student=document.getElementById("studentForm");
+ const ft=document.getElementById("facultyTab"), st=document.getElementById("studentTab");
+ function showStudent(on){
+   faculty.hidden=on; student.hidden=!on;
+   ft.className=on?"btn btn-outline-primary flex-fill":"btn btn-primary flex-fill";
+   st.className=on?"btn btn-primary flex-fill":"btn btn-outline-primary flex-fill";
+   faculty.querySelectorAll("input").forEach(x=>x.disabled=on);
+   student.querySelectorAll("input").forEach(x=>x.disabled=!on);
+ }
+ showStudent(false); ft.addEventListener("click",()=>showStudent(false)); st.addEventListener("click",()=>showStudent(true));
+})();
+</script>
+{% endblock %}

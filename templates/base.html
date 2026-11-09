@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#2563eb">
+  <meta name="theme-color" content="#17324d">
   <link rel="manifest" href="{{ url_for('pwa_manifest') }}">
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icons/icon.svg') }}">
   <title>{% block title %}AttendEase{% endblock %} | Student Attendance</title>
@@ -14,8 +14,8 @@
 <body>
 {% if current_user.is_authenticated %}
 <div class="app-shell">
-  <aside class="sidebar">
-    <a class="brand" href="{{ url_for('dashboard') }}"><span class="brand-icon"><i class="bi bi-mortarboard-fill"></i></span> AttendEase</a>
+  <aside class="sidebar" id="appSidebar">
+    <div class="brand-row"><a class="brand" href="{{ url_for('dashboard') }}"><span class="brand-icon"><i class="bi bi-mortarboard-fill"></i></span><span class="brand-name">AttendEase</span></a><button class="sidebar-toggle" id="sidebarToggle" type="button" aria-label="Collapse navigation" aria-expanded="true"><i class="bi bi-layout-sidebar-inset"></i></button></div>
     <div class="sidebar-label">WORKSPACE</div>
     <a class="nav-link-custom {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}"><i class="bi bi-grid-1x2"></i><span>Dashboard</span></a>
     <a class="nav-link-custom {% if request.endpoint in ['students','student_form'] %}active{% endif %}" href="{{ url_for('students') }}"><i class="bi bi-people"></i><span>Students</span></a>
@@ -24,7 +24,7 @@
     <a class="nav-link-custom {% if request.endpoint == 'reports' %}active{% endif %}" href="{{ url_for('reports') }}"><i class="bi bi-bar-chart"></i><span>Reports</span></a>
     <div class="sidebar-bottom">
       <div class="user-mini"><div class="avatar">{{ current_user.name[:1].upper() }}</div><div><strong>{{ current_user.name }}</strong><small>Faculty account</small></div></div>
-      <form method="post" action="{{ url_for('logout') }}"><button class="nav-link-custom logout-button"><i class="bi bi-box-arrow-left"></i><span>Sign out</span></button></form>
+      <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="nav-link-custom logout-button"><i class="bi bi-box-arrow-left"></i><span>Sign out</span></button></form>
     </div>
   </aside>
   <main class="main-area">
@@ -37,6 +37,7 @@
   {% if messages %}<div class="flash-stack">{% for category, message in messages %}<div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">{{ message }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endfor %}</div>{% endif %}
 {% endwith %}
 {% block content %}{% endblock %}
+{% if current_user.is_authenticated %}<footer class="site-footer"><span>Student Attendance Management System</span><span><a href="{{ url_for('privacy') }}">Privacy</a><a href="{{ url_for('terms') }}">Terms</a></span></footer>{% endif %}
 {% if current_user.is_authenticated %}
     </div>
   </main>
@@ -49,6 +50,16 @@
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => navigator.serviceWorker.register("{{ url_for('pwa_service_worker') }}").catch((error) => console.error("Service worker registration failed:", error)));
   }
+</script>
+<script>
+(() => {
+ const sidebar=document.getElementById("appSidebar"), toggle=document.getElementById("sidebarToggle");
+ if(!sidebar||!toggle)return;
+ const key="attendance-sidebar-collapsed";
+ const apply=collapsed=>{sidebar.classList.toggle("collapsed",collapsed);toggle.setAttribute("aria-expanded",String(!collapsed));toggle.setAttribute("aria-label",collapsed?"Expand navigation":"Collapse navigation");};
+ apply(localStorage.getItem(key)==="true");
+ toggle.addEventListener("click",()=>{const collapsed=!sidebar.classList.contains("collapsed");apply(collapsed);localStorage.setItem(key,String(collapsed));});
+})();
 </script>
 </body>
 </html>

@@ -1,15 +1,20 @@
 {
   "id": "/",
-  "name": "Student Attendance",
+  "name": "Student Attendance Management System",
   "short_name": "Attendance",
-  "description": "Student Attendance Management System for managing student records and attendance.",
+  "description": "Manage student records, subjects and classroom attendance.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#ffffff",
-  "theme_color": "#2563eb",
+  "background_color": "#f3f5f6",
+  "theme_color": "#17324d",
   "icons": [
-    { "src": "/static/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+    {
+      "src": "/static/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
   ]
 }

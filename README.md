@@ -50,7 +50,7 @@ A responsive college attendance application built with **Python Flask** and **My
    python app.py
    ```
 
-6. Open `http://127.0.0.1:5000` and create your faculty account.
+6. Apply the student-account migration to the existing database after taking a backup:\n   ```bash\n   mysql -u YOUR_USER -p student_attendance < migrations/2026_11_09_student_accounts.sql\n   ```\n7. Enter each student's verified date of birth in their student record. Existing records will not be able to use student login until this is completed.\n8. Open `http://127.0.0.1:5000`. Faculty accounts must be provisioned through an authorized process; public faculty self-registration is disabled by default.
 
 ## Project structure
 ```text
@@ -71,5 +71,5 @@ student-attendance-management-system/
 - CSRF protection is enabled for form submissions.
 - Faculty self-registration is disabled by default; provision accounts through a controlled administrator workflow.
 - Secure session cookies and no-store headers protect authenticated responses.
-- Role-based student accounts, database migrations, login throttling, and production deployment validation remain required before public launch.
+- Student and faculty sign-in use separate account types. Student first activation checks the roll number and date of birth, then requires the student to create a password of at least 12 characters. Subsequent sign-ins use roll number and password.\n- Student dashboard queries are scoped to the signed-in student's own ID; faculty-only management routes reject student accounts server-side.\n- Apply the SQL migration before deploying the new model fields. Back up the database first.\n- Date of birth is not a strong secret. For a real college rollout, pair first activation with an administrator-issued one-time activation code or another verified identity check, and add persistent login throttling before public launch.\n- Complete automated tests, login throttling, production database migration validation, and deployment security review before public launch.
 - Never commit `.env` or real credentials.

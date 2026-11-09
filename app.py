@@ -1,9 +1,10 @@
 import csv
 import io
 import os
+import secrets
 from datetime import date, datetime
 
-from flask import Flask, Response, abort, flash, redirect, render_template, request, url_for, send_from_directory
+from flask import Flask, Response, abort, flash, redirect, render_template, request, url_for, send_from_directory, session
 from flask_login import (
     LoginManager, UserMixin, current_user, login_required, login_user, logout_user
 )
@@ -30,7 +31,7 @@ def apply_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    if current_user.is_authenticated or request.endpoint in {"login", "register"}:
+    if current_user.is_authenticated or request.endpoint in {"login", "register", "student_attendance"}:
         response.headers["Cache-Control"] = "no-store, private"
         response.headers["Pragma"] = "no-cache"
     return response
@@ -52,19 +53,9 @@ class Faculty(UserMixin, db.Model):
         return check_password_hash(self.password_hash, password)
 
 
-class Student(UserMixin, db.Model):
+class Student(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    date_of_birth = db.Column(db.Date, nullable=True)
-    password_hash = db.Column(db.String(255), nullable=True)
-
-    def get_id(self):
-        return f"student:{self.id}"
-
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
-
-    def check_password(self, password):
-        return bool(self.password_hash) and check_password_hash(self.password_hash, password)
+    access_code_hash = db.Column(db.String(255), nullable=True)
     roll_number = db.Column(db.String(30), unique=True, nullable=False, index=True)
     name = db.Column(db.String(100), nullable=False)
     department = db.Column(db.String(80), nullable=False)
@@ -106,8 +97,6 @@ def load_user(user_id):
         return None
     if account_type == "faculty":
         return db.session.get(Faculty, record_id)
-    if account_type == "student":
-        return db.session.get(Student, record_id)
     return None
 
 
@@ -185,34 +174,45 @@ def login():
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
     if request.method == "POST":
-        if request.form.get("account_type") == "student":
-            roll = request.form.get("roll_number", "").strip()
-            student = Student.query.filter_by(roll_number=roll).first()
-            if student and student.password_hash:
-                if student.check_password(request.form.get("student_password", "")):
-                    login_user(student)
-                    return redirect(url_for("dashboard"))
-            elif student and not student.password_hash:
-                try:
-                    dob = datetime.strptime(request.form.get("date_of_birth", ""), "%Y-%m-%d").date()
-                except ValueError:
-                    dob = None
-                first = request.form.get("new_password", "")
-                second = request.form.get("confirm_password", "")
-                if dob and student.date_of_birth == dob and len(first) >= 12 and first == second:
-                    student.set_password(first)
-                    db.session.commit()
-                    login_user(student)
-                    return redirect(url_for("dashboard"))
-            flash("Unable to sign in. Check your details or contact the college administrator.", "danger")
-        else:
-            email = request.form.get("email", "").strip().lower()
-            faculty = Faculty.query.filter_by(email=email).first()
-            if faculty and faculty.check_password(request.form.get("password", "")):
-                login_user(faculty)
-                return redirect(url_for("dashboard"))
-            flash("Incorrect email or password.", "danger")
+        email = request.form.get("email", "").strip().lower()
+        faculty = Faculty.query.filter_by(email=email).first()
+        if faculty and faculty.check_password(request.form.get("password", "")):
+            login_user(faculty)
+            return redirect(url_for("dashboard"))
+        flash("Incorrect email or password.", "danger")
     return render_template("login.html")
+
+
+@app.route("/student-attendance", methods=["GET", "POST"])
+def student_attendance():
+    student = None
+    student_id = session.get("student_view_id")
+    if student_id:
+        student = db.session.get(Student, student_id)
+        if not student:
+            session.pop("student_view_id", None)
+    if request.method == "POST":
+        roll = request.form.get("roll_number", "").strip()
+        code = request.form.get("access_code", "").strip()
+        candidate = Student.query.filter_by(roll_number=roll).first()
+        if candidate and candidate.access_code_hash and check_password_hash(candidate.access_code_hash, code):
+            session["student_view_id"] = candidate.id
+            session.modified = True
+            return redirect(url_for("student_attendance"))
+        flash("Those details could not be verified. Check your roll number and private access code.", "danger")
+    if student:
+        records = Attendance.query.filter_by(student_id=student.id).order_by(Attendance.attendance_date.desc()).all()
+        total = len(records)
+        present = sum(1 for record in records if record.status == "Present")
+        return render_template("student_dashboard.html", student=student, records=records, total=total, present=present)
+    return render_template("student_lookup.html")
+
+
+@app.route("/student-attendance/logout", methods=["POST"])
+def student_attendance_logout():
+    session.pop("student_view_id", None)
+    flash("You have left the student attendance view.", "info")
+    return redirect(url_for("student_attendance"))
 
 @app.route("/logout", methods=["POST"])
 @login_required
@@ -270,29 +270,45 @@ def student_form(student_id=None):
         return redirect(url_for("students"))
 
     if request.method == "POST":
+        is_new = student.id is None
         student.roll_number = request.form.get("roll_number", "").strip()
         student.name = request.form.get("name", "").strip()
         student.department = request.form.get("department", "").strip()
         student.year = request.form.get("year", "").strip()
         student.email = request.form.get("email", "").strip() or None
-        try:
-            student.date_of_birth = datetime.strptime(request.form.get("date_of_birth", ""), "%Y-%m-%d").date()
-        except ValueError:
-            student.date_of_birth = None
 
-        if not all([student.roll_number, student.name, student.department, student.year, student.date_of_birth]):
+        if not all([student.roll_number, student.name, student.department, student.year]):
             flash("Please complete all required fields.", "danger")
         else:
             existing = Student.query.filter_by(roll_number=student.roll_number).first()
             if existing and existing.id != student.id:
                 flash("That roll number is already in use.", "danger")
             else:
+                new_access_code = secrets.token_urlsafe(9) if is_new else None
+                if new_access_code:
+                    student.access_code_hash = generate_password_hash(new_access_code)
                 db.session.add(student)
                 db.session.commit()
-                flash("Student details saved.", "success")
+                if new_access_code:
+                    flash(f"Student saved. Give this private access code to the student now. It is shown only once: {new_access_code}", "success")
+                else:
+                    flash("Student details saved.", "success")
                 return redirect(url_for("students"))
 
     return render_template("student_form.html", student=student)
+
+
+@app.route("/students/<int:student_id>/access-code", methods=["POST"])
+@faculty_required
+def regenerate_student_access_code(student_id):
+    student = db.session.get(Student, student_id)
+    if not student:
+        abort(404)
+    code = secrets.token_urlsafe(9)
+    student.access_code_hash = generate_password_hash(code)
+    db.session.commit()
+    flash(f"New private access code for {student.name}. Share it directly with the student. It is shown only once: {code}", "success")
+    return redirect(url_for("students"))
 
 
 @app.route("/students/<int:student_id>/delete", methods=["POST"])

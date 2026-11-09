@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block title %}Student attendance lookup{% endblock %}{% block content %}
+<div class="auth-card">
+  <div class="auth-logo"><i class="bi bi-clipboard2-check"></i></div>
+  <p class="eyebrow text-center">ATTENDEASE STUDENT PORTAL</p>
+  <h1 class="auth-title">View your attendance</h1>
+  <p class="text-muted text-center mb-4">Enter the roll number and private access code given to you by your faculty.</p>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="mb-3"><label class="form-label">College roll number</label><input class="form-control form-control-lg" name="roll_number" required autocomplete="username" maxlength="30"></div>
+    <div class="mb-4"><label class="form-label">Private access code</label><input class="form-control form-control-lg" name="access_code" required autocomplete="one-time-code" maxlength="64"></div>
+    <button class="btn btn-primary btn-lg w-100">View my attendance</button>
+  </form>
+  <p class="small text-muted text-center mt-4 mb-0">This page is read-only. Students cannot mark or change attendance.</p>
+  <div class="text-center mt-3"><a href="{{ url_for('login') }}">Faculty sign in</a></div>
+</div>
+{% endblock %}

@@ -68,5 +68,8 @@ student-attendance-management-system/
 - Set a long, random `SECRET_KEY`.
 - Restrict faculty registration to authorized staff.
 - Use HTTPS and a production WSGI server.
-- Add CSRF protection and role-based administration before exposing the app publicly.
+- CSRF protection is enabled for form submissions.
+- Faculty self-registration is disabled by default; provision accounts through a controlled administrator workflow.
+- Secure session cookies and no-store headers protect authenticated responses.
+- Role-based student accounts, database migrations, login throttling, and production deployment validation remain required before public launch.
 - Never commit `.env` or real credentials.
